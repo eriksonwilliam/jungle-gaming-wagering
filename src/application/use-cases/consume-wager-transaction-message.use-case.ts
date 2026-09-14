@@ -2,12 +2,22 @@ import { InboxMessage } from "../../domain/messaging/inbox-message";
 import type { Clock } from "../ports/clock.port";
 import type { InboxRepository } from "../ports/inbox-repository.port";
 import type { UnitOfWork } from "../ports/unit-of-work.port";
-import type { SubmitWagerTransaction, SubmitWagerTransactionInput } from "./submit-wager-transaction.use-case";
+import type {
+  SubmitWagerTransaction,
+  SubmitWagerTransactionInput,
+  SubmitWagerTransactionResult,
+} from "./submit-wager-transaction.use-case";
 
 const CONSUMER_NAME = "wager-transactions";
 
 export interface ConsumeWagerTransactionMessageInput extends SubmitWagerTransactionInput {
   messageId: string;
+}
+
+export interface ConsumeWagerTransactionMessageResult {
+  /** true quando a mensagem já tinha sido processada — dedup de inbox, nem chega a tocar `SubmitWagerTransaction`. */
+  duplicateDelivery: boolean;
+  submitResult?: SubmitWagerTransactionResult;
 }
 
 /**
@@ -25,12 +35,13 @@ export class ConsumeWagerTransactionMessage {
     private readonly clock: Clock,
   ) {}
 
-  async execute(input: ConsumeWagerTransactionMessageInput): Promise<void> {
+  async execute(input: ConsumeWagerTransactionMessageInput): Promise<ConsumeWagerTransactionMessageResult> {
     const existing = await this.inboxRepository.findByConsumerAndMessageId(CONSUMER_NAME, input.messageId);
     if (existing?.isProcessed()) {
-      return;
+      return { duplicateDelivery: true };
     }
 
+    let submitResult!: SubmitWagerTransactionResult;
     await this.unitOfWork.run(async () => {
       const inbox =
         existing ??
@@ -41,10 +52,11 @@ export class ConsumeWagerTransactionMessage {
           receivedAt: this.clock.now(),
         });
 
-      await this.submitWagerTransaction.execute(input);
+      submitResult = await this.submitWagerTransaction.execute(input);
 
       inbox.markProcessed(this.clock.now());
       await this.inboxRepository.save(inbox);
     });
+    return { duplicateDelivery: false, submitResult };
   }
 }

@@ -116,9 +116,10 @@ export class WagerTransactionConsumer implements OnModuleInit, OnModuleDestroy {
     }
 
     const payloadHash = canonicalJsonHash(parsed.data);
+    const startedAt = performance.now();
 
     try {
-      await runInDbContext(this.orm, () =>
+      const result = await runInDbContext(this.orm, () =>
         this.consumeWagerTransactionMessage.execute({
           messageId: parsed.messageId,
           providerId: parsed.data.providerId,
@@ -136,7 +137,16 @@ export class WagerTransactionConsumer implements OnModuleInit, OnModuleDestroy {
         }),
       );
       await this.ack(message);
+      this.metrics.observeHistogram("wager_transaction_processing_duration_ms", performance.now() - startedAt, { channel: "sqs" });
       this.metrics.incrementCounter("wager_transactions_consumed_total", { outcome: "ok" });
+      if (result.duplicateDelivery) {
+        this.metrics.incrementCounter("wager_transactions_duplicate_deliveries_total");
+      } else {
+        this.metrics.incrementCounter("wager_transactions_total", { channel: "sqs", status: result.submitResult!.transaction.status });
+        if (result.submitResult!.idempotentReplay) {
+          this.metrics.incrementCounter("wager_transactions_replays_total", { channel: "sqs" });
+        }
+      }
     } catch (error) {
       if (error instanceof DomainError || error instanceof IdempotencyConflictError) {
         this.logger.warn("sqs_message_business_error", { messageId: parsed.messageId, error: error.message });
@@ -149,6 +159,7 @@ export class WagerTransactionConsumer implements OnModuleInit, OnModuleDestroy {
         error: error instanceof Error ? error.message : String(error),
       });
       this.metrics.incrementCounter("wager_transactions_consumed_total", { outcome: "transient_error" });
+      this.metrics.incrementCounter("wager_transactions_retries_total", { reason: "transient_error" });
     }
   }
 

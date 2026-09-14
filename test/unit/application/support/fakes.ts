@@ -213,16 +213,18 @@ export class FakeLogger implements Logger {
 
 export class FakeMetrics implements Metrics {
   readonly counters: Record<string, number> = {};
+  readonly histogramObservations: Record<string, number[]> = {};
+  readonly gauges: Record<string, number> = {};
 
   incrementCounter(name: string): void {
     this.counters[name] = (this.counters[name] ?? 0) + 1;
   }
 
-  observeHistogram(): void {
-    // não utilizado nos testes atuais
+  observeHistogram(name: string, valueMs: number): void {
+    (this.histogramObservations[name] ??= []).push(valueMs);
   }
 
-  setGauge(): void {
-    // não utilizado nos testes atuais
+  setGauge(name: string, value: number): void {
+    this.gauges[name] = value;
   }
 }

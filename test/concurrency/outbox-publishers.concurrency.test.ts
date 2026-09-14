@@ -8,7 +8,7 @@ import { MikroOrmOutboxRepository } from "../../src/infrastructure/persistence/m
 import { runInDbContext } from "../../src/infrastructure/persistence/mikro-orm/run-in-context";
 import type { EventPublisher } from "../../src/application/ports/event-publisher.port";
 import { PublishOutboxBatch } from "../../src/application/use-cases/publish-outbox-batch.use-case";
-import { FakeClock, FakeLogger } from "../unit/application/support/fakes";
+import { FakeClock, FakeLogger, FakeMetrics } from "../unit/application/support/fakes";
 import { startTestDatabase, type TestDatabase } from "../integration/support/test-database";
 
 interface TestData {
@@ -69,8 +69,8 @@ describe("Concorrência — dois publishers sobre a mesma outbox (Postgres real)
     const publisherB = new RecordingPublisher();
     const clock = new FakeClock(now);
 
-    const batchA = new PublishOutboxBatch(new MikroOrmOutboxRepository(db.orm.em), publisherA, clock, new FakeLogger());
-    const batchB = new PublishOutboxBatch(new MikroOrmOutboxRepository(ormB.em), publisherB, clock, new FakeLogger());
+    const batchA = new PublishOutboxBatch(new MikroOrmOutboxRepository(db.orm.em), publisherA, clock, new FakeLogger(), new FakeMetrics());
+    const batchB = new PublishOutboxBatch(new MikroOrmOutboxRepository(ormB.em), publisherB, clock, new FakeLogger(), new FakeMetrics());
 
     await Promise.all([
       runInDbContext(db.orm, () => batchA.execute(MESSAGE_COUNT)),

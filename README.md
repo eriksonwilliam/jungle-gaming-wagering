@@ -14,6 +14,7 @@ paralelo. Decisões técnicas e trade-offs estão em [ARCHITECTURE.md](ARCHITECT
 - ORM: MikroORM 7
 - Mensageria: AWS SQS via LocalStack
 - Identidade: Keycloak (OIDC)
+- Observabilidade: métricas Prometheus nativas (`/metrics`) + Grafana
 - Orquestração local: Docker Compose
 
 `bun audit`: **0 vulnerabilidades conhecidas** (ver [ARCHITECTURE.md §2.1](ARCHITECTURE.md#21-versões--nestjs-12--mikroorm-7-zero-vulnerabilidades-conhecidas)).
@@ -48,6 +49,13 @@ A API sobe em `http://localhost:3000` — via compose, esse endereço é o
 `nginx`; localmente, é a própria aplicação — com Swagger/OpenAPI em `/docs`.
 `/health/live` e `/health/ready` não exigem autenticação; os demais endpoints
 exigem `Authorization: Bearer <token>`.
+
+Cada instância expõe métricas Prometheus em `/metrics` (transações por
+status/canal, duplicatas, retries, conflitos de lock, profundidade da DLQ,
+outbox lag, latência de processamento). Via compose, `http://localhost:3100`
+é o Grafana (`admin`/`admin`, também com leitura anônima liberada) com o
+dashboard "Wagering Processor" já provisionado; `http://localhost:9090` é o
+Prometheus. Ver [ARCHITECTURE.md §12.6](ARCHITECTURE.md#126-métricas-mínimas-e-dashboard--do-comentário-morto-ao-dado-real).
 
 ### Obtendo um token do Keycloak
 
@@ -90,6 +98,9 @@ scripts/           scripts operacionais (migração via API do MikroORM — ver 
 deploy/
   keycloak/        realm importado automaticamente pelo docker-compose
   localstack/      script que provisiona as filas SQS na subida do LocalStack
+  nginx/           reverse proxy round-robin na frente das 3 instâncias
+  prometheus/      config de scrape (app1/app2/app3 direto, não via nginx)
+  grafana/         datasource + dashboard provisionados automaticamente
 test/
   unit/            domain + application, mocks de portas — 100% de cobertura
   integration/     Postgres + LocalStack reais via testcontainers
@@ -130,6 +141,14 @@ wallets sob a mesma concorrência (p95 mais que dobra — efeito visível do loc
 pessimista de linha sob contenção, agora com o tráfego de fato distribuído
 entre as três) — metodologia e números completos em
 [ARCHITECTURE.md §13](ARCHITECTURE.md#13-teste-de-carga-diferencial-opcional).
+
+Prometheus e Grafana também foram validados de ponta a ponta, não só
+configurados: os 3 alvos do Prometheus (`app1`/`app2`/`app3`) reportando
+`up`, tráfego real gerado via `bun run test:load` populando as métricas, e
+as mesmas expressões PromQL dos 11 painéis do dashboard consultadas direto
+pela API do Prometheus e pelo proxy de query do Grafana — as duas devolvendo
+dado real. Detalhes em
+[ARCHITECTURE.md §12.6](ARCHITECTURE.md#126-métricas-mínimas-e-dashboard--do-comentário-morto-ao-dado-real).
 
 Vários bugs reais só apareceram rodando contra infraestrutura de verdade
 (nenhum mock os pegava) e foram corrigidos durante essa validação — detalhes

@@ -6,6 +6,7 @@ import { ProcessPendingReferences } from "../../../../src/application/use-cases/
 import {
   FakeClock,
   FakeIdGenerator,
+  FakeMetrics,
   InMemoryLedgerRepository,
   InMemoryOutboxRepository,
   InMemoryWagerTransactionRepository,
@@ -21,6 +22,7 @@ function buildSut() {
   const ledgerRepository = new InMemoryLedgerRepository();
   const outboxRepository = new InMemoryOutboxRepository();
   const clock = new FakeClock(NOW);
+  const metrics = new FakeMetrics();
   const useCase = new ProcessPendingReferences(
     walletRepository,
     wagerTransactionRepository,
@@ -29,8 +31,9 @@ function buildSut() {
     new PassthroughUnitOfWork(),
     clock,
     new FakeIdGenerator(),
+    metrics,
   );
-  return { walletRepository, wagerTransactionRepository, ledgerRepository, outboxRepository, clock, useCase };
+  return { walletRepository, wagerTransactionRepository, ledgerRepository, outboxRepository, clock, metrics, useCase };
 }
 
 function pendingRefund(overrides: Partial<Parameters<typeof WagerTransaction.create>[0]> = {}): WagerTransaction {
@@ -68,7 +71,7 @@ describe("ProcessPendingReferences", () => {
   });
 
   it("agenda novo retry quando a referência ainda não chegou e o limite não foi esgotado", async () => {
-    const { useCase, wagerTransactionRepository } = buildSut();
+    const { useCase, wagerTransactionRepository, metrics } = buildSut();
     const tx = pendingRefund();
     wagerTransactionRepository.seed(tx);
 
@@ -78,10 +81,11 @@ describe("ProcessPendingReferences", () => {
     const stored = await wagerTransactionRepository.findById(tx.id);
     expect(stored!.status).toBe(WagerTransactionStatus.PendingReference);
     expect(stored!.referenceAttempts).toBe(1);
+    expect(metrics.counters["wager_transactions_retries_total"]).toBe(1);
   });
 
   it("rejeita com REFERENCE_NOT_FOUND quando esgota as tentativas", async () => {
-    const { useCase, wagerTransactionRepository, outboxRepository, clock } = buildSut();
+    const { useCase, wagerTransactionRepository, outboxRepository, clock, metrics } = buildSut();
     const tx = pendingRefund();
     for (let i = 0; i < 8; i += 1) {
       tx.scheduleReferenceRetry(NOW);
@@ -94,6 +98,7 @@ describe("ProcessPendingReferences", () => {
     const stored = await wagerTransactionRepository.findById(tx.id);
     expect(stored!.status).toBe(WagerTransactionStatus.Rejected);
     expect(stored!.failureCode).toBe("REFERENCE_NOT_FOUND");
+    expect(metrics.counters["wager_transactions_reference_exhausted_total"]).toBe(1);
     expect(outboxRepository.messages.some((m) => m.eventType === "WagerTransactionRejected")).toBe(true);
   });
 

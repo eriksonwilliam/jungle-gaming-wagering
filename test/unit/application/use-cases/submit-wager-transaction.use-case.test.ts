@@ -11,6 +11,7 @@ import {
 import {
   FakeClock,
   FakeIdGenerator,
+  FakeMetrics,
   InMemoryLedgerRepository,
   InMemoryOutboxRepository,
   InMemoryWagerTransactionRepository,
@@ -27,6 +28,7 @@ function buildSut() {
   const outboxRepository = new InMemoryOutboxRepository();
   const clock = new FakeClock(NOW);
   const idGenerator = new FakeIdGenerator();
+  const metrics = new FakeMetrics();
   const useCase = new SubmitWagerTransaction(
     walletRepository,
     wagerTransactionRepository,
@@ -35,8 +37,9 @@ function buildSut() {
     new PassthroughUnitOfWork(),
     clock,
     idGenerator,
+    metrics,
   );
-  return { walletRepository, wagerTransactionRepository, ledgerRepository, outboxRepository, clock, idGenerator, useCase };
+  return { walletRepository, wagerTransactionRepository, ledgerRepository, outboxRepository, clock, idGenerator, metrics, useCase };
 }
 
 function baseInput(overrides: Partial<SubmitWagerTransactionInput> = {}): SubmitWagerTransactionInput {
@@ -371,7 +374,7 @@ describe("SubmitWagerTransaction", () => {
   });
 
   it("perde a corrida de idempotência (INSERT concorrente) e devolve o resultado da vencedora como replay", async () => {
-    const { useCase, walletRepository, wagerTransactionRepository } = buildSut();
+    const { useCase, walletRepository, wagerTransactionRepository, metrics } = buildSut();
     seedWallet(walletRepository, "100.00");
     const input = baseInput({ money: { amount: "25.00", currency: "BRL" }, payloadHash: "hash-race" });
 
@@ -410,6 +413,7 @@ describe("SubmitWagerTransaction", () => {
 
     expect(result.idempotentReplay).toBe(true);
     expect(result.transaction.id).toBe(winner.id);
+    expect(metrics.counters["wager_transactions_lock_conflicts_total"]).toBe(1);
   });
 
   it("propaga a corrida de idempotência quando a vencedora não é encontrada", async () => {

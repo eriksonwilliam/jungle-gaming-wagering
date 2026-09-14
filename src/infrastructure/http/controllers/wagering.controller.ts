@@ -1,10 +1,12 @@
-import { BadRequestException, Body, Controller, Get, Headers, NotFoundException, Param, Post, Res } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Headers, Inject, NotFoundException, Param, Post, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
+import type { Metrics } from "../../../application/ports/metrics.port";
 import { canonicalJsonHash } from "../../../application/use-cases/support/canonical-hash";
 import { GetWagerTransaction } from "../../../application/use-cases/get-wager-transaction.use-case";
 import { SubmitWagerTransaction } from "../../../application/use-cases/submit-wager-transaction.use-case";
 import { WagerTransactionKind } from "../../../domain/wager-transaction/wager-transaction";
+import { METRICS } from "../../tokens";
 import { CorrelationId } from "../correlation-id.decorator";
 import { SubmitWagerTransactionDto } from "../dto/submit-wager-transaction.dto";
 import { presentWagerTransaction } from "../presenters/wager-transaction.presenter";
@@ -16,6 +18,7 @@ export class WageringController {
   constructor(
     private readonly submitWagerTransaction: SubmitWagerTransaction,
     private readonly getWagerTransaction: GetWagerTransaction,
+    @Inject(METRICS) private readonly metrics: Metrics,
   ) {}
 
   @Post("wagering/transactions")
@@ -44,6 +47,7 @@ export class WageringController {
       referenceExternalTransactionId: dto.referenceExternalTransactionId,
     });
 
+    const startedAt = performance.now();
     const result = await this.submitWagerTransaction.execute({
       providerId: dto.providerId,
       externalTransactionId: dto.externalTransactionId,
@@ -58,6 +62,11 @@ export class WageringController {
       referenceExternalTransactionId: dto.referenceExternalTransactionId,
       correlationId,
     });
+    this.metrics.observeHistogram("wager_transaction_processing_duration_ms", performance.now() - startedAt, { channel: "http" });
+    this.metrics.incrementCounter("wager_transactions_total", { channel: "http", status: result.transaction.status });
+    if (result.idempotentReplay) {
+      this.metrics.incrementCounter("wager_transactions_replays_total", { channel: "http" });
+    }
 
     res.status(statusForSubmitResult(result));
     return {

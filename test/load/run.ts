@@ -146,8 +146,9 @@ async function main(): Promise<void> {
   console.log(`Latência p99: ${percentile(latencies, 99).toFixed(1)}ms`);
   console.log(`Latência máxima: ${Math.max(...latencies).toFixed(1)}ms`);
   console.log(
-    "\nNota: outbox lag e conflitos de lock não são medidos aqui — exigiriam um endpoint de diagnóstico" +
-      " que este serviço não expõe (ver ARCHITECTURE.md, seção de teste de carga).",
+    "\nOutbox lag, conflitos de lock e profundidade da DLQ durante esta carga: ver o dashboard Grafana" +
+      " em http://localhost:3100 (admin/admin) — este script mede só o que o cliente HTTP observa" +
+      " (throughput e latência de resposta), não métricas internas do servidor.",
   );
 }
 

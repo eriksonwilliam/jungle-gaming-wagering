@@ -3,6 +3,7 @@ import { WagerTransactionRejected } from "../events/wager-transaction-rejected.e
 import type { Clock } from "../ports/clock.port";
 import type { IdGenerator } from "../ports/id-generator.port";
 import type { LedgerRepository } from "../ports/ledger-repository.port";
+import type { Metrics } from "../ports/metrics.port";
 import type { OutboxRepository } from "../ports/outbox-repository.port";
 import type { UnitOfWork } from "../ports/unit-of-work.port";
 import type { WagerTransactionRepository } from "../ports/wager-transaction-repository.port";
@@ -34,6 +35,7 @@ export class ProcessPendingReferences {
     private readonly unitOfWork: UnitOfWork,
     private readonly clock: Clock,
     private readonly idGenerator: IdGenerator,
+    private readonly metrics: Metrics,
   ) {}
 
   async execute(batchSize: number = DEFAULT_BATCH_SIZE): Promise<ProcessPendingReferencesResult> {
@@ -62,10 +64,12 @@ export class ProcessPendingReferences {
           this.idGenerator,
           WagerTransactionRejected.from(transaction, "REFERENCE_NOT_FOUND", { ...ctxBase, eventId: this.idGenerator.newId() }),
         );
+        this.metrics.incrementCounter("wager_transactions_reference_exhausted_total");
         return;
       }
       transaction.scheduleReferenceRetry(now);
       await this.wagerTransactionRepository.save(transaction);
+      this.metrics.incrementCounter("wager_transactions_retries_total", { reason: "pending_reference" });
       return;
     }
 

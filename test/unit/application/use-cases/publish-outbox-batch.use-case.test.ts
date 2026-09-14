@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { IntegrationEvent, type IntegrationEventProps } from "../../../../src/domain/messaging/integration-event";
 import { OutboxMessage } from "../../../../src/domain/messaging/outbox-message";
 import { PublishOutboxBatch } from "../../../../src/application/use-cases/publish-outbox-batch.use-case";
-import { FakeClock, FakeEventPublisher, FakeLogger, InMemoryOutboxRepository } from "../support/fakes";
+import { FakeClock, FakeEventPublisher, FakeLogger, FakeMetrics, InMemoryOutboxRepository } from "../support/fakes";
 
 const NOW = new Date("2026-01-01T00:00:00.000Z");
 
@@ -31,13 +31,14 @@ function buildSut() {
   const eventPublisher = new FakeEventPublisher();
   const clock = new FakeClock(NOW);
   const logger = new FakeLogger();
-  const useCase = new PublishOutboxBatch(outboxRepository, eventPublisher, clock, logger);
-  return { outboxRepository, eventPublisher, clock, logger, useCase };
+  const metrics = new FakeMetrics();
+  const useCase = new PublishOutboxBatch(outboxRepository, eventPublisher, clock, logger, metrics);
+  return { outboxRepository, eventPublisher, clock, logger, metrics, useCase };
 }
 
 describe("PublishOutboxBatch", () => {
   it("publica mensagens devidas e marca como publicadas", async () => {
-    const { outboxRepository, eventPublisher, useCase } = buildSut();
+    const { outboxRepository, eventPublisher, metrics, useCase } = buildSut();
     const message = buildMessage("outbox-1");
     outboxRepository.messages.push(message);
 
@@ -47,10 +48,11 @@ describe("PublishOutboxBatch", () => {
     expect(result.failed).toBe(0);
     expect(eventPublisher.published).toHaveLength(1);
     expect(message.isPending()).toBe(false);
+    expect(metrics.histogramObservations["outbox_publish_lag_ms"]).toEqual([0]); // FakeClock parado: publishedAt === occurredAt
   });
 
   it("reagenda com backoff quando a publicação falha, sem derrubar o lote", async () => {
-    const { outboxRepository, eventPublisher, logger, useCase } = buildSut();
+    const { outboxRepository, eventPublisher, logger, metrics, useCase } = buildSut();
     const failing = buildMessage("outbox-1");
     const succeeding = buildMessage("outbox-2");
     outboxRepository.messages.push(failing, succeeding);
@@ -65,6 +67,7 @@ describe("PublishOutboxBatch", () => {
     expect(succeeding.isPending()).toBe(false);
     expect(logger.entries).toHaveLength(1);
     expect(logger.entries[0]!.level).toBe("warn");
+    expect(metrics.counters["wager_transactions_retries_total"]).toBe(1);
   });
 
   it("respeita o batchSize informado", async () => {

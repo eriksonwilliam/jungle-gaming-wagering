@@ -215,6 +215,7 @@ function buildHarness(
     unitOfWork,
     clock,
     idGenerator,
+    new FakeMetrics(),
   );
   const consumeWagerTransactionMessage = new ConsumeWagerTransactionMessage(inboxRepository, submitWagerTransaction, unitOfWork, clock);
   const consumer = new WagerTransactionConsumer(

@@ -8,6 +8,7 @@ import { WagerTransactionRejected } from "../events/wager-transaction-rejected.e
 import type { Clock } from "../ports/clock.port";
 import type { IdGenerator } from "../ports/id-generator.port";
 import type { LedgerRepository } from "../ports/ledger-repository.port";
+import type { Metrics } from "../ports/metrics.port";
 import type { OutboxRepository } from "../ports/outbox-repository.port";
 import type { UnitOfWork } from "../ports/unit-of-work.port";
 import type { WagerTransactionRepository } from "../ports/wager-transaction-repository.port";
@@ -53,6 +54,7 @@ export class SubmitWagerTransaction {
     private readonly unitOfWork: UnitOfWork,
     private readonly clock: Clock,
     private readonly idGenerator: IdGenerator,
+    private readonly metrics: Metrics,
   ) {}
 
   async execute(input: SubmitWagerTransactionInput): Promise<SubmitWagerTransactionResult> {
@@ -86,6 +88,7 @@ export class SubmitWagerTransaction {
         // a checagem inicial não viu nada nas duas, e o INSERT desta perdeu
         // para a constraint única do banco. A vencedora já commitou (é por
         // isso que a constraint disparou) — busca e devolve o resultado dela.
+        this.metrics.incrementCounter("wager_transactions_lock_conflicts_total");
         const winner = await this.wagerTransactionRepository.findByIdempotencyKey(input.idempotencyKey);
         if (winner) {
           return this.buildReplay(winner, input);

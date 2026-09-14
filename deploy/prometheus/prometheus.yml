@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  # Scrape direto em cada instância (não via nginx) — precisamos do label
+  # "instance" distinguindo app1/app2/app3 nos painéis, e passar pelo load
+  # balancer colapsaria as três atrás de um único alvo.
+  - job_name: wagering-processor
+    static_configs:
+      - targets: ["app1:3000", "app2:3000", "app3:3000"]
+        labels:
+          service: wagering-processor

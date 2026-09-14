@@ -21,6 +21,7 @@ import { MikroOrmOutboxRepository } from "../persistence/mikro-orm/repositories/
 import { MikroOrmWagerTransactionRepository } from "../persistence/mikro-orm/repositories/wager-transaction.repository";
 import { MikroOrmWalletRepository } from "../persistence/mikro-orm/repositories/wallet.repository";
 import { MikroOrmUnitOfWork } from "../persistence/mikro-orm/unit-of-work.adapter";
+import { DlqDepthScheduler } from "../scheduling/dlq-depth.scheduler";
 import { OutboxPublisherScheduler } from "../scheduling/outbox-publisher.scheduler";
 import { PendingReferenceScheduler } from "../scheduling/pending-reference.scheduler";
 import { ApplicationExceptionFilter } from "../http/filters/application-exception.filter";
@@ -144,8 +145,9 @@ const env = (key: string, fallback = ""): string => process.env[key] ?? fallback
         uow: UnitOfWork,
         clock: Clock,
         idGen: IdGenerator,
-      ) => new SubmitWagerTransaction(walletRepo, txRepo, ledgerRepo, outboxRepo, uow, clock, idGen),
-      inject: [WALLET_REPOSITORY, WAGER_TRANSACTION_REPOSITORY, LEDGER_REPOSITORY, OUTBOX_REPOSITORY, UNIT_OF_WORK, CLOCK, ID_GENERATOR],
+        metrics: PrometheusMetrics,
+      ) => new SubmitWagerTransaction(walletRepo, txRepo, ledgerRepo, outboxRepo, uow, clock, idGen, metrics),
+      inject: [WALLET_REPOSITORY, WAGER_TRANSACTION_REPOSITORY, LEDGER_REPOSITORY, OUTBOX_REPOSITORY, UNIT_OF_WORK, CLOCK, ID_GENERATOR, METRICS],
     },
     {
       provide: ConsumeWagerTransactionMessage,
@@ -163,14 +165,15 @@ const env = (key: string, fallback = ""): string => process.env[key] ?? fallback
         uow: UnitOfWork,
         clock: Clock,
         idGen: IdGenerator,
-      ) => new ProcessPendingReferences(walletRepo, txRepo, ledgerRepo, outboxRepo, uow, clock, idGen),
-      inject: [WALLET_REPOSITORY, WAGER_TRANSACTION_REPOSITORY, LEDGER_REPOSITORY, OUTBOX_REPOSITORY, UNIT_OF_WORK, CLOCK, ID_GENERATOR],
+        metrics: PrometheusMetrics,
+      ) => new ProcessPendingReferences(walletRepo, txRepo, ledgerRepo, outboxRepo, uow, clock, idGen, metrics),
+      inject: [WALLET_REPOSITORY, WAGER_TRANSACTION_REPOSITORY, LEDGER_REPOSITORY, OUTBOX_REPOSITORY, UNIT_OF_WORK, CLOCK, ID_GENERATOR, METRICS],
     },
     {
       provide: PublishOutboxBatch,
-      useFactory: (outboxRepo: OutboxRepository, publisher: SqsEventPublisher, clock: Clock, logger: Logger) =>
-        new PublishOutboxBatch(outboxRepo, publisher, clock, logger),
-      inject: [OUTBOX_REPOSITORY, EVENT_PUBLISHER, CLOCK, LOGGER],
+      useFactory: (outboxRepo: OutboxRepository, publisher: SqsEventPublisher, clock: Clock, logger: Logger, metrics: PrometheusMetrics) =>
+        new PublishOutboxBatch(outboxRepo, publisher, clock, logger, metrics),
+      inject: [OUTBOX_REPOSITORY, EVENT_PUBLISHER, CLOCK, LOGGER, METRICS],
     },
     {
       provide: GetWallet,
@@ -231,6 +234,12 @@ const env = (key: string, fallback = ""): string => process.env[key] ?? fallback
       provide: PendingReferenceScheduler,
       useFactory: (orm: MikroORM, processRefs: ProcessPendingReferences) => new PendingReferenceScheduler(orm, processRefs),
       inject: [MikroORM, ProcessPendingReferences],
+    },
+    {
+      provide: DlqDepthScheduler,
+      useFactory: (client: SQSClient, metrics: PrometheusMetrics) =>
+        new DlqDepthScheduler(client, env("WAGER_TRANSACTIONS_DLQ_QUEUE_URL"), metrics),
+      inject: [SQS_CLIENT, METRICS],
     },
   ],
 })

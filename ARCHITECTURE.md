@@ -425,8 +425,8 @@ reais, testado manualmente contra Postgres/LocalStack/Keycloak reais. O
 
 ## 12.4 Limitações conhecidas
 
-- **Sem OpenTelemetry e sem dashboard** — explicitamente opcional no
-  enunciado (seção 12).
+- **Sem OpenTelemetry (tracing distribuído)** — explicitamente opcional no
+  enunciado (seção 12). Dashboard (Grafana + Prometheus) existe — ver §12.6.
 - **Sem ledger de partidas dobradas (double-entry bookkeeping)** —
   explicitamente diferencial opcional (seção 6.4), não requisito.
 - **WIN com `referenceExternalTransactionId` opcional**: quando informado, o
@@ -490,6 +490,76 @@ Dois problemas reais só apareceram ao escrever esses testes:
   continua gatendo 100% porque passa `--coverage` explicitamente na CLI, que
   reativa a coleta (e o `coverageThreshold`) só para aquele script.
 
+## 12.6 Métricas mínimas e dashboard — do comentário morto ao dado real
+
+`Metrics` (`src/application/ports/metrics.port.ts`) sempre teve um comentário
+listando a exigência da seção 12 do enunciado: "métricas mínimas exigidas:
+status de transações, duplicatas, retries, DLQ, locks, outbox lag, latência".
+Em algum ponto do desenvolvimento, só duas dessas sete existiam de verdade
+(`wager_transactions_consumed_total` e `wallet_reconciliation_divergence_total`)
+— o comentário descrevia uma intenção, não o estado real do código, e um
+dashboard construído em cima disso teria ficado majoritariamente vazio. As
+cinco que faltavam foram fechadas:
+
+- **Status de transações** (`wager_transactions_total{channel,status}`):
+  instrumentado na borda — `WageringController` (canal HTTP) e
+  `WagerTransactionConsumer` (canal SQS) — não dentro de
+  `SubmitWagerTransaction`, que é código de domínio/aplicação compartilhado
+  pelos dois canais e não deveria saber por qual chegou. Isso exigiu
+  `ConsumeWagerTransactionMessage.execute` parar de descartar o resultado de
+  `SubmitWagerTransaction` (retornava `void`) e passar a devolver
+  `{ duplicateDelivery, submitResult }`.
+- **Duplicatas detectadas**: `wager_transactions_replays_total` (mesma
+  `Idempotency-Key`, replay) nas duas bordas, mais
+  `wager_transactions_duplicate_deliveries_total` (redelivery do SQS
+  deduplicada pelo inbox antes mesmo de tocar `SubmitWagerTransaction`).
+- **Retries**: `wager_transactions_retries_total{reason}` — erro transitório
+  no consumidor SQS, nova tentativa de referência pendente
+  (`ProcessPendingReferences`) e falha de publicação na outbox
+  (`PublishOutboxBatch`), cada um com seu `reason`.
+- **Conflitos de lock**: `wager_transactions_lock_conflicts_total`, no ponto
+  exato onde `SubmitWagerTransaction` já captura a corrida de idempotência
+  sob `INSERT` concorrente (`IdempotencyRaceLostError`, ver §12.1) — a
+  métrica só formaliza um caso que o código já tratava corretamente.
+- **DLQ**: o processo nunca vê uma mensagem sendo movida para a DLQ — é o
+  broker que decide isso, sem notificar o consumidor. A única forma honesta
+  de observar profundidade de DLQ é perguntar à fila por fora do fluxo de
+  consumo: `DlqDepthScheduler` (mesmo padrão `setInterval` do
+  `OutboxPublisherScheduler`) faz `GetQueueAttributesCommand` a cada 10s e
+  publica `wager_transactions_dlq_depth` como gauge.
+- **Outbox lag**: `outbox_publish_lag_ms` (histograma), calculado em
+  `PublishOutboxBatch` como `publishedAt - occurredAt` no momento em que a
+  mensagem é marcada publicada — o tempo real entre o evento acontecer e sair
+  para o SQS, não uma aproximação.
+- **Latência de processamento**: `wager_transaction_processing_duration_ms`
+  (histograma, por canal), medido nas duas bordas ao redor da chamada a
+  `SubmitWagerTransaction`/`ConsumeWagerTransactionMessage`.
+
+Threading `Metrics` por `SubmitWagerTransaction`, `ProcessPendingReferences`
+e `PublishOutboxBatch` — os três em `application/`, sob o gate de cobertura
+100% — significava um novo parâmetro de construtor obrigatório em cada um.
+Antes de fazer isso, foi confirmado que cada classe tem exatamente um ponto
+de construção por arquivo de teste (um `buildSut()`/`buildHarness()`
+reaproveitado por todos os `it()`, nunca instanciação repetida por teste) —
+o raio de mudança real era 5 arquivos de teste por classe, não dezenas.
+`FakeMetrics` (suporte de teste) passou a gravar histogramas e gauges de
+verdade (`histogramObservations`, `gauges`) em vez de descartá-los — sem
+isso, não haveria como testar que `observeHistogram`/`setGauge` foram
+chamados com os valores certos.
+
+**Dashboard**: `docker-compose.yml` ganhou `prometheus` (scrape a cada 5s,
+direto em `app1:3000`/`app2:3000`/`app3:3000` — não via `nginx`, porque o
+label `instance` por trás do load balancer precisa continuar distinguindo as
+três) e `grafana` (`http://localhost:3100`, `admin`/`admin`, também com
+acesso anônimo de leitura), com datasource e dashboard provisionados
+automaticamente (`deploy/grafana/provisioning/`,
+`deploy/grafana/dashboards/wagering-processor.json`) — sobe pronto, sem
+configuração manual. Validado de ponta a ponta contra a stack real: os 3
+alvos do Prometheus `up`, tráfego gerado via `bun run test:load`, e as
+mesmas expressões PromQL dos 11 painéis do dashboard consultadas direto
+pela API do Prometheus e pelo proxy de query do próprio Grafana — os dois
+devolvendo dado real, não apenas a definição do painel carregando.
+
 ## 13. Teste de carga (diferencial opcional)
 
 `bun run test:load` (`test/load/run.ts`) sobe uma carga sintética contra a
@@ -539,8 +609,12 @@ máquina compartilhada é uma explicação plausível) — reportado como está,
 inventar uma causa, porque a métrica que realmente importa aqui (a cauda
 alongando sob contenção) é inequívoca nos dois testes.
 
-**O que não foi medido, e por quê**: outbox lag (tempo entre commit e
-publicação no SQS) e contagem explícita de conflitos de lock exigiriam um
-endpoint de diagnóstico que este serviço não expõe — não fabricado aqui.
-Não há meta de RPS definida; o objetivo era caracterizar o comportamento sob
+**Outbox lag e conflitos de lock durante esta carga**: agora existem como
+métrica real (`outbox_publish_lag_ms`, `wager_transactions_lock_conflicts_total`
+— ver §12.6) e ficam visíveis no dashboard Grafana
+(`http://localhost:3100`) durante a execução do teste — não foram
+capturados aqui porque este script mede o que o cliente HTTP observa
+(throughput e latência de resposta), não métricas internas do servidor; o
+dashboard é o lugar certo para olhar isso, não duplicado em texto aqui. Não
+há meta de RPS definida; o objetivo era caracterizar o comportamento sob
 contenção, não maximizar um número.

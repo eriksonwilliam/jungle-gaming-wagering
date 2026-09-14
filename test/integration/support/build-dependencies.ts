@@ -32,6 +32,7 @@ export function buildDependencies(orm: MikroORM) {
   const inboxRepository = new MikroOrmInboxRepository(em);
   const outboxRepository = new MikroOrmOutboxRepository(em);
   const unitOfWork = new MikroOrmUnitOfWork(orm);
+  const metrics = new FakeMetrics();
 
   const submitWagerTransaction = new SubmitWagerTransaction(
     walletRepository,
@@ -41,10 +42,12 @@ export function buildDependencies(orm: MikroORM) {
     unitOfWork,
     clock,
     idGenerator,
+    metrics,
   );
 
   return {
     em,
+    metrics,
     walletRepository,
     wagerTransactionRepository,
     ledgerRepository,
@@ -62,6 +65,7 @@ export function buildDependencies(orm: MikroORM) {
       unitOfWork,
       clock,
       idGenerator,
+      metrics,
     ),
     reconcileWallet: new ReconcileWallet(walletRepository, ledgerRepository, new FakeLogger(), new FakeMetrics()),
     run: <T>(fn: () => Promise<T>): Promise<T> => runInDbContext(orm, fn),

@@ -1,6 +1,7 @@
 import type { Clock } from "../ports/clock.port";
 import type { EventPublisher } from "../ports/event-publisher.port";
 import type { Logger } from "../ports/logger.port";
+import type { Metrics } from "../ports/metrics.port";
 import type { OutboxRepository } from "../ports/outbox-repository.port";
 
 const DEFAULT_BATCH_SIZE = 50;
@@ -23,6 +24,7 @@ export class PublishOutboxBatch {
     private readonly eventPublisher: EventPublisher,
     private readonly clock: Clock,
     private readonly logger: Logger,
+    private readonly metrics: Metrics,
   ) {}
 
   async execute(batchSize: number = DEFAULT_BATCH_SIZE): Promise<PublishOutboxBatchResult> {
@@ -33,13 +35,18 @@ export class PublishOutboxBatch {
     for (const message of batch) {
       try {
         await this.eventPublisher.publish(message);
-        message.markPublished(this.clock.now());
+        const publishedAt = this.clock.now();
+        message.markPublished(publishedAt);
         await this.outboxRepository.update(message);
         published += 1;
+        this.metrics.observeHistogram("outbox_publish_lag_ms", publishedAt.getTime() - message.occurredAt.getTime(), {
+          eventType: message.eventType,
+        });
       } catch (error) {
         message.scheduleRetry(this.clock.now());
         await this.outboxRepository.update(message);
         failed += 1;
+        this.metrics.incrementCounter("wager_transactions_retries_total", { reason: "outbox_publish_failed" });
         this.logger.warn("outbox_publish_failed", {
           outboxMessageId: message.id,
           eventType: message.eventType,

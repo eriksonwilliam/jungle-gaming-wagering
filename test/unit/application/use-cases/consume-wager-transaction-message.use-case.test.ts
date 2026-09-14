@@ -8,6 +8,7 @@ import { SubmitWagerTransaction, type SubmitWagerTransactionInput } from "../../
 import {
   FakeClock,
   FakeIdGenerator,
+  FakeMetrics,
   InMemoryInboxRepository,
   InMemoryLedgerRepository,
   InMemoryOutboxRepository,
@@ -34,6 +35,7 @@ function buildSut() {
     unitOfWork,
     clock,
     new FakeIdGenerator(),
+    new FakeMetrics(),
   );
   const useCase = new ConsumeWagerTransactionMessage(inboxRepository, submitWagerTransaction, unitOfWork, clock);
   return { walletRepository, wagerTransactionRepository, inboxRepository, useCase };
@@ -63,8 +65,10 @@ describe("ConsumeWagerTransactionMessage", () => {
     const wallet = Wallet.open({ id: "wallet-1", playerId: "player-1", initialBalance: Money.from({ amount: "100.00", currency: "BRL" }), now: NOW });
     walletRepository.seed(wallet);
 
-    await useCase.execute(baseInput());
+    const result = await useCase.execute(baseInput());
 
+    expect(result.duplicateDelivery).toBe(false);
+    expect(result.submitResult!.transaction.status).toBe(WagerTransactionStatus.Processed);
     const stored = await wagerTransactionRepository.findByIdempotencyKey("provider-a:ext-1");
     expect(stored!.status).toBe(WagerTransactionStatus.Processed);
     const inbox = await inboxRepository.findByConsumerAndMessageId("wager-transactions", "msg-1");
@@ -77,8 +81,10 @@ describe("ConsumeWagerTransactionMessage", () => {
     walletRepository.seed(wallet);
 
     await useCase.execute(baseInput());
-    await useCase.execute(baseInput());
+    const replay = await useCase.execute(baseInput());
 
+    expect(replay.duplicateDelivery).toBe(true);
+    expect(replay.submitResult).toBeUndefined();
     const stored = await wagerTransactionRepository.findByIdempotencyKey("provider-a:ext-1");
     expect(stored!.status).toBe(WagerTransactionStatus.Processed);
     const finalWallet = await walletRepository.findById("wallet-1");
