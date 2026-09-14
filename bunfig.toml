@@ -1,0 +1,16 @@
+[install]
+# "hoisted" (padrão do bun) resolve mal o conflito ajv@6 (eslint) vs ajv@8
+# (ajv-draft-04, transitivo de @mikro-orm/migrations via umzug/@rushstack) —
+# ajv-draft-04 fica sem node_modules aninhado e sobe até achar o ajv errado.
+# "isolated" dá a cada pacote sua própria resolução e evita o conflito.
+linker = "isolated"
+
+[test]
+# coverage = true  # habilitado via --coverage no script test:coverage
+coverageReporter = ["text", "lcov"]
+coveragePathIgnorePatterns = [
+  "src/main.ts",
+  "src/infrastructure/**",
+  "test/**",
+]
+coverageThreshold = { lines = 1.0, functions = 1.0 }

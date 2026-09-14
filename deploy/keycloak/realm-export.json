@@ -1,0 +1,51 @@
+{
+  "realm": "wagering",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "accessTokenLifespan": 300,
+  "roles": {
+    "realm": [
+      { "name": "provider", "description": "Provedor de jogos autorizado a submeter transações" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "wagering-api",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["*"],
+      "protocolMappers": [
+        {
+          "name": "wagering-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "wagering-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "provider-a",
+      "email": "provider-a@example.com",
+      "firstName": "Provider",
+      "lastName": "A",
+      "enabled": true,
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [
+        { "type": "password", "value": "provider-a", "temporary": false }
+      ],
+      "realmRoles": ["provider"]
+    }
+  ]
+}

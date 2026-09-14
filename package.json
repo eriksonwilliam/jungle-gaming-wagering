@@ -1,0 +1,59 @@
+{
+  "name": "wagering-processor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "author": "Erikson William",
+  "scripts": {
+    "start": "bun run src/main.ts",
+    "start:dev": "bun --watch run src/main.ts",
+    "build": "bun build ./src/main.ts --target=bun --outdir=dist --external @nestjs/microservices --external @nestjs/websockets --external swagger-ui-dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "bun test test/unit",
+    "test:coverage": "bun test test/unit --coverage",
+    "test:integration": "bun test test/integration",
+    "test:concurrency": "bun test test/concurrency",
+    "test:load": "bun run test/load/run.ts",
+    "migration:create": "bunx mikro-orm migration:create",
+    "migration:up": "bun run scripts/migrate.ts up",
+    "migration:down": "bun run scripts/migrate.ts down"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sqs": "^3.699.0",
+    "@mikro-orm/core": "^7.2.0",
+    "@mikro-orm/decorators": "^7.2.0",
+    "@mikro-orm/migrations": "^7.2.0",
+    "@mikro-orm/nestjs": "^7.1.0",
+    "@mikro-orm/postgresql": "^7.2.0",
+    "@nestjs/common": "^12.0.1",
+    "@nestjs/core": "^12.0.1",
+    "@nestjs/platform-express": "^12.0.1",
+    "@nestjs/swagger": "^12.0.1",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "swagger-ui-dist": "^5.32.15"
+  },
+  "devDependencies": {
+    "@mikro-orm/cli": "^7.2.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.15.0",
+    "@typescript-eslint/parser": "^8.15.0",
+    "bun-types": "^1.4.2",
+    "eslint": "^9.15.0",
+    "testcontainers": "^12.1.0",
+    "typescript": "^5.7.2"
+  },
+  "mikro-orm": {
+    "configPaths": [
+      "./src/infrastructure/persistence/mikro-orm/mikro-orm.config.ts"
+    ]
+  },
+  "overrides": {
+    "multer": "^2.3.0"
+  }
+}
